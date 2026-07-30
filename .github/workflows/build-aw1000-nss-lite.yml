@@ -23,6 +23,10 @@ permissions:
 env:
     REPO_URL: https://github.com/qosmio/openwrt-ipq.git
     REPO_BRANCH: 24.10-nss
+    # 24.10-nss 已跟进 Linux 6.6.141，但 NSS bonding LAG 补丁仍停留在
+    # 较旧内核上下文。固定已审计的源码与上游 PR #109 修复，避免静默漂移。
+    REPO_COMMIT: 2a9a39243cf39a053b25286826be711505605029
+    BONDING_FIX_COMMIT: c4507843a8e8983f70bbcb18b4f1cbf6f00512a2
     NSS_PACKAGES_BRANCH: NSS-12.5-K6.x-wwan
     USE_PYMUMU_SMARTDNS: "1"
     CONFIG_FILE: AW1000-NSS/.config
@@ -92,14 +96,21 @@ jobs:
             - name: 🌱 克隆 OpenWrt 源码
               working-directory: /workdir
               run: |
-                  git clone --single-branch --depth=1 --branch="$REPO_BRANCH" "$REPO_URL" openwrt
+                  git init openwrt
+                  git -C openwrt remote add origin "$REPO_URL"
+                  git -C openwrt fetch --depth=1 origin "$REPO_COMMIT"
+                  git -C openwrt checkout --detach "$REPO_COMMIT"
+                  test "$(git -C openwrt rev-parse HEAD)" = "$REPO_COMMIT"
                   ln -sf /workdir/openwrt "$GITHUB_WORKSPACE/openwrt"
 
-            - name: 🩹 刷新 qosmio NSS bonding LAG 补丁
+            - name: 🩹 应用 qosmio PR #109 完整 bonding LAG 修复
               working-directory: ./openwrt
               run: |
-                  bash "$GITHUB_WORKSPACE/AW1000-NSS/scripts/refresh-qosmio-bonding-lag-patch.sh"
-                  grep -n 'bond_should_broadcast_neighbor\|bond_xmit_xor' target/linux/qualcommax/patches-6.6/0600-4-qca-nss-ecm-support-net-bonding-over-LAG-interface.patch
+                  patch_file="target/linux/qualcommax/patches-6.6/0600-4-qca-nss-ecm-support-net-bonding-over-LAG-interface.patch"
+                  git fetch --depth=1 origin "$BONDING_FIX_COMMIT"
+                  test "$(git rev-parse FETCH_HEAD)" = "$BONDING_FIX_COMMIT"
+                  git checkout FETCH_HEAD -- "$patch_file"
+                  grep -n 'bond_should_broadcast_neighbor\|bond_xmit_xor' "$patch_file"
 
             - name: 🧬 提取 LLVM BPF 预编译工具链
               working-directory: ./openwrt
@@ -113,7 +124,7 @@ jobs:
                   path: |
                       ~/.ccache
                       /workdir/openwrt/dl
-                  key: ${{ runner.os }}-openwrt-AW1000-NSS-Lite-${{ env.REPO_BRANCH }}-${{ env.NSS_PACKAGES_BRANCH }}-${{ hashFiles('AW1000-NSS/.config', 'AW1000-NSS/diy.sh', 'AW1000-NSS/scripts/**', 'AW1000-NSS/files/**', 'packages/**') }}
+                  key: ${{ runner.os }}-openwrt-AW1000-NSS-Lite-${{ env.REPO_COMMIT }}-${{ env.BONDING_FIX_COMMIT }}-${{ env.NSS_PACKAGES_BRANCH }}-${{ hashFiles('AW1000-NSS/.config', 'AW1000-NSS/diy.sh', 'AW1000-NSS/scripts/**', 'AW1000-NSS/files/**', 'packages/**') }}
                   restore-keys: |
                       ${{ runner.os }}-openwrt-AW1000-NSS-Lite-${{ env.REPO_BRANCH }}-${{ env.NSS_PACKAGES_BRANCH }}-
                       ${{ runner.os }}-openwrt-AW1000-NSS-Lite-${{ env.REPO_BRANCH }}-
