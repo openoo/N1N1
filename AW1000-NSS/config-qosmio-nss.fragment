@@ -1,0 +1,10 @@
+# AW1000 NSS Lite (qosmio/openwrt-ipq + qosmio/nss-packages) WWAN stack.
+# This line uses the WWAN packages supplied by NSS-12.5-K6.x-wwan; it must not
+# use QModem's differently named nested kmod-qmi_wwan_q_nss package.
+CONFIG_NSS_DRV_C2C_ENABLE=y
+CONFIG_NSS_DRV_RMNET_ENABLE=y
+# CONFIG_PACKAGE_luci-app-qmodem_INCLUDE_vendor-qmi-wwan is not set
+# CONFIG_PACKAGE_luci-app-qmodem_INCLUDE_generic-qmi-wwan is not set
+CONFIG_PACKAGE_luci-app-qmodem_INCLUDE_nss-qmi-wwan=y
+CONFIG_PACKAGE_kmod-rmnet-nss=y
+CONFIG_PACKAGE_kmod-usb-net-qmi-wwan-quectel=y

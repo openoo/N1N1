@@ -199,12 +199,14 @@ jobs:
               working-directory: ./openwrt
               run: |
                   make defconfig
-                  for package in kmod-rmnet-nss kmod-qmi_wwan_q_nss; do
-                    if ! grep -Fqx "CONFIG_PACKAGE_${package}=y" .config; then
-                      echo "::error::QModem NSS 依赖未生成：$package"
-                      exit 1
-                    fi
-                  done
+                  grep -Fqx 'CONFIG_PACKAGE_kmod-qmi_wwan_q=y' .config || {
+                    echo '::error::AW1000 vendor QMI 驱动未生成'
+                    exit 1
+                  }
+                  if grep -Fqx 'CONFIG_PACKAGE_kmod-qmi_wwan_q_nss=y' .config; then
+                    echo '::error::AW1000 不应同时选择不稳定的 NSS QMI 驱动'
+                    exit 1
+                  fi
                   ./scripts/diffconfig.sh > "$GITHUB_WORKSPACE/aw1000-libwrt-nss-diffconfig.txt"
                   make download -j8
                   find dl -size -1024c -exec ls -l {} \;

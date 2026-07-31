@@ -28,8 +28,10 @@ env:
     REPO_COMMIT: 2a9a39243cf39a053b25286826be711505605029
     BONDING_FIX_COMMIT: c4507843a8e8983f70bbcb18b4f1cbf6f00512a2
     NSS_PACKAGES_BRANCH: NSS-12.5-K6.x-wwan
+    AW1000_QMI_STACK: qosmio-nss
     USE_PYMUMU_SMARTDNS: "1"
     CONFIG_FILE: AW1000-NSS/.config
+    QMI_CONFIG_FRAGMENT: AW1000-NSS/config-qosmio-nss.fragment
     DIY_SH: AW1000-NSS/diy.sh
     FILES: AW1000-NSS/files
     TZ: Asia/Shanghai
@@ -124,7 +126,7 @@ jobs:
                   path: |
                       ~/.ccache
                       /workdir/openwrt/dl
-                  key: ${{ runner.os }}-openwrt-AW1000-NSS-Lite-${{ env.REPO_COMMIT }}-${{ env.BONDING_FIX_COMMIT }}-${{ env.NSS_PACKAGES_BRANCH }}-${{ hashFiles('AW1000-NSS/.config', 'AW1000-NSS/diy.sh', 'AW1000-NSS/scripts/**', 'AW1000-NSS/files/**', 'packages/**') }}
+                  key: ${{ runner.os }}-openwrt-AW1000-NSS-Lite-${{ env.REPO_COMMIT }}-${{ env.BONDING_FIX_COMMIT }}-${{ env.NSS_PACKAGES_BRANCH }}-${{ hashFiles('AW1000-NSS/.config', 'AW1000-NSS/config-qosmio-nss.fragment', 'AW1000-NSS/diy.sh', 'AW1000-NSS/scripts/**', 'AW1000-NSS/files/**', 'packages/**') }}
                   restore-keys: |
                       ${{ runner.os }}-openwrt-AW1000-NSS-Lite-${{ env.REPO_BRANCH }}-${{ env.NSS_PACKAGES_BRANCH }}-
                       ${{ runner.os }}-openwrt-AW1000-NSS-Lite-${{ env.REPO_BRANCH }}-
@@ -138,6 +140,7 @@ jobs:
             - name: 🛠️ 准备脚本和配置
               run: |
                   [ -e "$CONFIG_FILE" ] && dos2unix "$CONFIG_FILE"
+                  [ -e "$QMI_CONFIG_FRAGMENT" ] && dos2unix "$QMI_CONFIG_FRAGMENT"
                   [ -e "$DIY_SH" ] && dos2unix "$DIY_SH"
                   find AW1000-NSS/scripts -type f -exec dos2unix {} \;
                   find "$FILES" -type f -exec dos2unix {} \; || true
@@ -170,6 +173,15 @@ jobs:
                   find openwrt/files/etc/uci-defaults openwrt/files/etc/hotplug.d -type f -exec chmod 0755 {} \; 2>/dev/null || true
                   cp "$CONFIG_FILE" openwrt/.config
                   cd openwrt
+                  sed -i -E \
+                    -e '/^CONFIG_NSS_DRV_(C2C|RMNET)_ENABLE=/d' \
+                    -e '/^# CONFIG_NSS_DRV_(C2C|RMNET)_ENABLE is not set$/d' \
+                    -e '/^CONFIG_PACKAGE_luci-app-qmodem_INCLUDE_(vendor|generic|nss)-qmi-wwan=/d' \
+                    -e '/^# CONFIG_PACKAGE_luci-app-qmodem_INCLUDE_(vendor|generic|nss)-qmi-wwan is not set$/d' \
+                    -e '/^CONFIG_PACKAGE_kmod-(rmnet-nss|usb-net-qmi-wwan-quectel|qmi_wwan_q_nss)=/d' \
+                    -e '/^# CONFIG_PACKAGE_kmod-(rmnet-nss|usb-net-qmi-wwan-quectel|qmi_wwan_q_nss) is not set$/d' \
+                    .config
+                  cat "$GITHUB_WORKSPACE/$QMI_CONFIG_FRAGMENT" >> .config
                   "$GITHUB_WORKSPACE/$DIY_SH"
                   sed -i \
                     -e '/^CONFIG_PACKAGE_luci-theme-argon=/d' \
@@ -218,7 +230,22 @@ jobs:
             - name: 📦 下载源码包
               working-directory: ./openwrt
               run: |
-                  make defconfig
+                  make defconfig 2>&1 | tee /tmp/aw1000-lite-defconfig.log
+                  test "${PIPESTATUS[0]}" -eq 0
+                  if grep -Fq 'recursive dependency detected' /tmp/aw1000-lite-defconfig.log; then
+                    echo '::error::Lite 配置仍存在递归依赖'
+                    exit 1
+                  fi
+                  for package in kmod-rmnet-nss kmod-usb-net-qmi-wwan-quectel; do
+                    grep -Fqx "CONFIG_PACKAGE_${package}=y" .config || {
+                      echo "::error::qosmio NSS WWAN 依赖未生成：$package"
+                      exit 1
+                    }
+                  done
+                  if grep -Fqx 'CONFIG_PACKAGE_kmod-qmi_wwan_q_nss=y' .config; then
+                    echo '::error::Lite 线误选了 QModem 内置的 kmod-qmi_wwan_q_nss'
+                    exit 1
+                  fi
                   ./scripts/diffconfig.sh > "$GITHUB_WORKSPACE/aw1000-nss-lite-diffconfig.txt"
                   make download -j8
                   find dl -size -1024c -exec ls -l {} \;
