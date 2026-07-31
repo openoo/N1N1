@@ -55,6 +55,40 @@ mkdir -p package/custom-feeds
 # git clone --depth=1 https://github.com/obsy/modemdata package/custom-feeds/obsy-modemdata
 # git clone --depth=1 https://github.com/obsy/modemband package/custom-feeds/obsy-modemband
 git clone --depth=1 https://github.com/FUjr/QModem package/custom-feeds/qmodem
+
+# OpenWrt 只扫描 package/ 下有限的目录深度。QModem 把这两个 NSS
+# 内核包放在 driver/nss/*，其 Makefile 比扫描上限深一层，结果 qmodem
+# 能声明依赖，但生成 rootfs 时 apk 找不到对应包。若其他 NSS feed 尚未
+# 提供同名内核包，就在 driver/ 下建立浅一层的入口供包扫描器发现。
+expose_qmodem_nss_package() {
+	local source_name="$1"
+	local kernel_package="$2"
+	local source_dir="package/custom-feeds/qmodem/driver/nss/$source_name"
+	local link_dir="package/custom-feeds/qmodem/driver/$source_name"
+	local existing_makefile
+
+	existing_makefile="$(find -L package -mindepth 1 -maxdepth 5 -type f -name Makefile \
+		-exec grep -qF "define KernelPackage/$kernel_package" {} \; -print -quit)"
+	if [ -n "$existing_makefile" ]; then
+		echo "==> $kernel_package 已由 $existing_makefile 提供"
+		return
+	fi
+
+	if [ ! -f "$source_dir/Makefile" ]; then
+		echo "错误：QModem 缺少 $source_dir/Makefile" >&2
+		exit 1
+	fi
+	if [ -e "$link_dir" ] || [ -L "$link_dir" ]; then
+		echo "错误：无法为 $kernel_package 创建包扫描入口：$link_dir 已存在" >&2
+		exit 1
+	fi
+
+	ln -s "nss/$source_name" "$link_dir"
+	echo "==> 已暴露 QModem NSS 内核包：$kernel_package"
+}
+
+expose_qmodem_nss_package rmnet-nss rmnet-nss
+expose_qmodem_nss_package quectel_QMI_WWAN_nss qmi_wwan_q_nss
 # git clone --depth=1 https://github.com/4IceG/luci-app-modemband package/custom-feeds/luci-app-modemband
 git clone --depth=1 https://github.com/4IceG/luci-app-atinout package/custom-feeds/luci-app-atinout
 # git clone --depth=1 https://github.com/nooblk-98/luci-app-3ginfo-lite package/custom-feeds/luci-app-3ginfo-lite
